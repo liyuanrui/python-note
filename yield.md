@@ -364,25 +364,161 @@ StopIteration
 #### 示例: 使用协程计算移动平均值
 
 ```
-
+def averager():
+    total = 0.0
+    count = 0
+    average = None
+    while True:   #1
+        term = yield average   #2
+        total += term
+        count += 1
+        average = total/count
 ```
 
+1. 这个while True表明，只要调用方不断把值发给这个协程，他就会一直接收值，然后生成结果，仅当调用方在协程上调用.close()方法，或者没有对协程的引用而被垃圾回收程序回收时，这个协程才会终止。
+
+2. 这里的yield表达式用于暂停执行程序，把结果发给调用方，还用于接收调用方后面发给协程的值，恢复while True。
 
 
+#### 终止协程和异常处理
+
+协程中未处理的异常会向上冒泡。传给next函数或send方法的调用方(即触发协程的对象)。
+
+**未处理的异常会导致协程终止**
+```
+>>> coro_avg = averager()
+>>> next(coro_avg)
+>>> coro_avg.send(40)
+40.0
+>>> coro_avg.send('spam')
+Traceback (most recent call last):
+  ...
+TypeError: unsupported operand type(s) for +=: 'float' and 'str'
+>>> coro_avg.send(50)
+Traceback (most call last):
+  ...
+StopIteration
+```
+
+示例暗示了终止协程的一种方式: 发送哨符值，让协程退出。
+
+从Python2.5开始，客户代码可以在生成器对象上调用两个方法，显式地把异常发给协程。
+
+**generator.throw(exc_type[, exc_value[, traceback]])**
+致使生成器在暂停的yield表达式处抛出指定的异常。如果生成器处理了抛出的异常，代码会向前执行到下一个yield表达式，而产出的值会成为调用generator.throw方法得到的返回值。如果生成器没有处理抛出的异常，异常会向上冒泡，传到调用方的上下文中。
 
 
+"generator.close()"
+致使生成器在暂停的yield表达式出抛出GeneratorExit异常。 如果生成器没有处理这个异常，或者抛出了StopIteration异常(通常是指运行到结尾), 调用方不会报错。如果收到GeneratorExit异常，生成器一定不能产出值，否则解释器会抛出RuntimeError异常。生成器抛出的其他异常会向上冒泡，传给调用方。
 
 
+#### 让协程返回值
+
+```
+from collections import namedtuple
+
+Result = namedtuple('Result', 'count average')
+
+def averager():
+    total = 0.0
+    count = 0
+    average = None
+    while True:
+        term = yield
+        if term is None:
+            break
+        total += term
+        count += 1
+        average = total/count
+    return Result(count, average)
+```
+
+```
+>>> coro_avg = averager()
+>>> next(coro.avg)
+>>> coro_avg.seng(10)
+>>> coro_avg.seng(30)
+>>> coro_avg.seng(6.5)
+>>> coro_avg.seng(None)
+Traceback (most recent call last):
+  ...
+StopIteration: Result(count=3, average=15.5)
+```
+
+注意，return表达式的值会偷偷传给调用方，赋值给StopIteration异常的一个属性。这样做有点不合常理，但是能保留生成器对象的常规行为--耗尽时抛出StopIteration异常。
 
 
+**捕获StopIteration异常，获取averager返回的值**
+
+```
+>>> coro_avg = averager()
+>>> next(coro.avg)
+>>> coro_avg.seng(10)
+>>> coro_avg.seng(30)
+>>> coro_avg.seng(6.5)
+>>> try:
+...     coro_avg.seng(None)
+... except StopIteration as exc:
+...     result = exc.value
+...
+>>> result
+Result(count=3, average=15.5)
+```
+
+获取协程的返回值虽然要绕个圈子，但这是PEP380定义的方式，当我们意识到这一点之后就说得通了：yield from结构会在内部自动捕获StopIteration异常。这种处理方式与for循环处理StopIteration异常的方式一样：循环机制使用户易于理解的方式处理异常。对yield from结构来说，解释器不仅会捕获StopIteration异常，还会把value属性的值变成yield from表达式的值。
+
+#### 使用yield from
+
+首先要知道，yield from是全新的语言结构。它的作用比yield多得多，因此人们认为继续使用那个关键字多少会引起误解。在其他语言中，类似的结构使用await关键字，这个名称好多了，因为它传达了至关重要的一点：在生成器gen中使用yield from subgen()时，subgen会获取控制权，把产出的值传给gen的调用方，即调用方可以直接控制subgen。与此同时，gen会阻塞，等待subgen释放。
 
 
+```
+def gen():
+    yield from 'AB'
+    yield from range(3)
+
+>>> list(gen())
+['A', 'B', 1, 2]
+```
+
+yield from x表达式对x做的第一件事情是，调用iter(x), 从中获取迭代器。因此，先可以是任何可迭代的对象。
+
+yield from是主要功能是打开双向通道，把最外层的调用方与最内层的子生成器连接起来，这样二者可以直接发送和产出值，还可以直接传入异常，而不用在位于中间的协程中添加大量处理异常的样板代码。有了这个结构，协程可以通过以前不可能的方式委托职责。
+
+**委派生成器**
+包含yield from <iterable>表达式的生成器函数。
+
+**子生成器**
+从yield from表达式中<iterator>部分获取的生成器。
+
+**调用方**
+PEP 380使用"调用方"这个术语指代调用委派生成器的客户端代码。在不同的语境中，我会使用"客户端"代替"调用方"，以此与委派生成器(也就是调用方，因为它调用了子生成器)区分开。
 
 
+委派生成器在yield from表达式处暂停时，调用方可以直接把数据发给子生成器，子生成器再把产出的值发给调用方。子生成器返回之后，解释器会抛出StopIteration异常，并把返回值附加到异常对象上，此时委派生成器会恢复。
 
 
+```
+此处手动实现示例代码
+```
 
+#### yield from的意义
 
+把迭代器当作生成器使用，相当于把子生成器的定义体内联在yield from表达式中。此外，子生成器可以执行return语句，返回一个值，而返回的值会成为yield from表达式的值。
 
+**yield from的6个特性**
 
+1. 子生成器产出的值都直接传给委派生成器的调用方(即客户端代码)。
+
+2. 使用sned()方法发给委派生成器的值都直接传给子生成器。如果发送的值是None，那么会调用子生成器的__exit__()方法。如果发送的值不是None，那么会调用子生成器的send()方法。如果调用的方法抛出StopIteration异常，那么委派生成器恢复运行。任何其它异常都会向上冒泡，传给委派生成器。
+
+3. 生成器退出时，生成器(或子生成器)中的return expr表达式会触发StopIteration(expr)异常抛出。
+
+4. yield from表达式的值是子生成器终止时传给StopIteration异常的第一个参数。
+
+yield from结构的另外两个特性与异常和终止有关。
+
+5. 传入委派生成器的异常，除了GeneratorExit之外都传给子生成器的throw()方法。如果调用throw()方法时抛出StopIteration异常，委派生成器恢复运行。StopIteration之外的异常会向上冒泡，传给委派生成器。
+
+6. 如果把GeneratorExit异常传入委派生成器，或者在委派生成器上调用close()方法，那么在子生成器上调用close()方法，如果它有的话。如果调用close()方法导致异常抛出，那么异常会向上冒泡，传给委派生成器，否则，委派生成器抛出GeneratorExit异常。
 
