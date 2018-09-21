@@ -313,7 +313,7 @@ StopIteration
 
 只有在多线程中才能看到这个状态，此外，生成器对象在自己身上调用getgenaratorstate函数也行，不过这样做没什么用。
 
-因为send方法的参数会成为暂停的yield表达式的值，所以，仅当协程处于暂停状态时才能调用sned方法，例如my_coro.sned(42)。不过，如果协程还没激活(即，状态是'GEN_CREATED')，情况就不同了。因此，始终要调用next(my_coro)激活协程--也可以调用my_coro.send(None)，效果一样。
+因为send方法的参数会成为暂停的yield表达式的值，所以，仅当协程处于暂停状态时才能调用send方法，例如my_coro.send(42)。不过，如果协程还没激活(即，状态是'GEN_CREATED')，情况就不同了。因此，始终要调用next(my_coro)激活协程--也可以调用my_coro.send(None)，效果一样。
 
 如果创建协程对象后立刻把None之外的值发给他，会出现以下错误:
 ```
