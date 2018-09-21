@@ -282,7 +282,7 @@ yield关键字甚至还可以不接收或传出数据。不管数据如何流动
 <generator object simple_coroutine at 0x...>
 >>> next(my_coro)   #4
 -> coroutine started
->>> my_coro.sned(42)   #5
+>>> my_coro.send(42)   #5
 -> coroutine received: 42
 Traceback (most recent call last):   #6
   ...
